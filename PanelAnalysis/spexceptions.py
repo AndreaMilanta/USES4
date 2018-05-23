@@ -6,5 +6,9 @@ class ImageNotFoundException(Exception):
     pass
 
 
-class InvalidParameter(Exception):
+class InvalidParameterException(Exception):
+    pass
+
+
+class NonBWImageException(Exception):
     pass

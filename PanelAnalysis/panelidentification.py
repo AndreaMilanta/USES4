@@ -2,52 +2,139 @@
 """
 import cv2
 import numpy as np
+from matplotlib import pyplot as plt
 
 import spimage as spi
 import spconstants as spc
 
-curr_image = spc.PATH_IMAGES + spc.FN_IMAGE
+curr_image = spc.PATH_IMAGES_NICC + spc.FN_IMAGE
+# curr_image = spc.PATH_IMAGES + spc.CF_IMAGE
 
-p1 = [137, 42]  # [185, 242]
-p2 = [92, 243]  # [490, 820]
-p3 = [605, 240]  # [974, 603]
-p4 = [606, 43]  # [711, 56]
-p1_s = [0, 0]
-p2_s = [0, 205]  # [0, 660]
-p3_s = [469, 205]  # [530, 660]
-p4_s = [469, 0]  # [530, 0]
+# DISPLAYING OPTI
+cntDefinition = 0.001    # Approximation level of contours (ignored if viewBox=True)
+cntColor = '#FFFFFF'    # Color of contours
+cntThick = 2            # Thickness of contours
+cntMinArea = 4000       # Minimum Area of contour
+linColor = '#0000FF'    # Color of lines
+linThick = 1            # Thickness of lines
+linMinLen = 800         # Minimum length of lines
 
-# Define input and output triangles
-rect_in = np.float32([[p1, p2, p3, p4]])
-rect_out = np.float32([[p1_s, p2_s, p3_s, p4_s]])
-
-# perMat = cv2.getPerspectiveTransform(rect_in, rect_out)
-
+# LOAD IMAGES
 origimg = spi.spimage(cv2.imread(curr_image, cv2.IMREAD_COLOR))
+
+# LINE COMPUTATION
+classimg = origimg.toBW()
+classimg.getCanny(50, 150, apSize=3, inplace=True)
+lines = classimg.getHoughLines(1, spc.deg2rad(1), 200)
+# origimg.show(view=True)
+
+# ROTATION
+lin = np.reshape(lines, (-1, 2))
+avg_deg = np.average(lin, axis=0)[1]
+origimg.rotate(spc.rad2deg(avg_deg), 'ccw', inplace=True)
+
+# COLOR TUNING
 img = origimg.enhanceColor('b', 1)
 img.enhanceColor('g', 1, inplace=True)
 img.enhanceColor('r', 0, inplace=True)
-# img2 = spi.spimage(cv2.blur(img.img, (7, 7)))
-# img2 = spi.spimage(cv2.GaussianBlur(img.img, (7, 7), sigmaX=5, sigmaY=5))
-# img.filterColor('b', 70, True, inplace=True, subcolor=(255, 255, 255))
-# img.filterColor('g', 50, True, inplace=True)
-img2 = img.toBW()
-img2.show()
+kernel_1 = np.ones((10, 10), np.uint8)
+kernel_2 = np.ones((3, 3), np.uint8)
+# img.filterColor('b', 1, True, inplace=True, subcolor=(255, 255, 255))
+img.filterColor('g', 100, True, inplace=True)
 
-thresh = cv2.adaptiveThreshold(img2.img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 111, 3)
-# ret, thresh = cv2.threshold(img2.img, 132, 255, cv2.THRESH_BINARY)
-spi.spimage(thresh).show()
-
-im2, contours, hierarchy = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-print(hierarchy)
-conts = list(filter(lambda x: cv2.contourArea(x) > 5000, contours))
-print(str(len(conts)) + ' contours found with area larger than 10000')
-# cv2.drawContours(origimg.img, conts, 5, (0, 0, 0), 3)
-for c in conts:
-    # origimg.addPolygon(cv2.boxPoints(cv2.minAreaRect(c)))
-    epsilon = 0.001 * cv2.arcLength(c, True)
-    approx = cv2.approxPolyDP(c, epsilon, True)
-    origimg.addPolygon(approx[:, 0], thick=1)
-origimg.show(view=True)
-# img2.show(view=True)
+# HISTOGRAM SINGLE AREA REPRESENTATION
+# a_noise = spi.histoArea([500, 0], [50, 50], None)
+# a_panel = spi.histoArea([300, 100], [50, 50], None)
+# noise = img.getAreaHist(a_noise, 'g')
+# panel = img.getAreaHist(a_panel, 'g')
+# plt.figure(100)
+# plt.title('Histograms')
+# plt.plot(noise, color='#00FF00', label='Panel')    # , bins=255, label='Panel', rwidth=None)
+# plt.plot(panel, color='#0000FF')    # , bins=255, label='Panel', rwidth=None)
+# plt.xlim([0, 256])
 # plt.show()
+
+# HISTOGRAM CLASSIFICATION
+m = 'euclidean'
+cp = origimg.copy()
+
+# 1 Iteration
+perc = 1   # percentage of area to be black for exclusione
+ksize = [5, 5]
+thresh = ksize[0] * ksize[1] * perc / 100
+kstep = ksize
+# kstep = [int(ksize[0] / 2), int(ksize[1] / 2)]
+try:
+    areas, _ = img.histoClassification('g', ksize, kstep, dst_metric=m, numCluster=3, showDendogram=False, view=False)
+except Exception as e:
+    print('Computation with metric: ' + m + ' returned the following error: ' + str(e))
+    exit()
+for i, a in enumerate(areas):
+    # print("Histogram " + str(i) + ": pos " + str(a.anchor))
+    # print(str(a.hist))
+    if a.hist[0] > thresh:
+        cp.colorAreas([a], '#000000')
+
+# 2 Iteration
+perc = 30   # percentage of area to be black for exclusion
+ksize = [cp.img.shape[1], 1]
+thresh = ksize[0] * ksize[1] * perc / 100
+kstep = ksize
+try:
+    areas, _ = cp.histoClassification('g', ksize, kstep, dst_metric=m, numCluster=3, showDendogram=False, view=False)
+except Exception as e:
+    print('Computation with metric: ' + m + ' returned the following error: ' + str(e))
+    exit()
+for i, a in enumerate(areas):
+    # print("Histogram " + str(i) + ": pos " + str(a.anchor))
+    # print(str(a.hist))
+    if a.hist[0] > thresh:
+        origimg.colorAreas([a], '#000000')
+
+# RECOMPUTE LINES (Horizontal)
+classimg = origimg.toBW()
+classimg.getCanny(0, 50, apSize=3, inplace=True)
+classimg.show(True)
+exit()
+lines = classimg.getHoughLines(1, spc.deg2rad(1), 100)
+for l in lines:
+    origimg.addLine(l)
+origimg.show(True)
+
+
+exit()
+
+# NOISE REDUCTION
+img.toBW(inplace=True)
+dst = img.toBW()
+dst = img.fastMeanDenoising(4)
+
+lap = dst.laplacian(ksize=17, inplace=False)
+lap.applyClahe(clipLimit=4, tileGridSize=(100, 100), inplace=True)
+lap.getCanny(100, 100, inplace=True)
+lineimg = origimg.copy()
+# lap.show(view=True)
+
+# GET LINES
+lines = lap.getHoughLines(1, np.pi / 180, linMinLen)
+for l in lines:
+    lineimg.addLine(l, thick=linThick, color=linColor)
+
+# GET CONTOURS
+# lap.applyClahe(clipLimit=4, tileGridSize=(100, 100), inplace=True)
+# thresh = lap.adaptiveThreshold('g', cv2.THRESH_BINARY, 111, 2)
+
+# contours, hierarchy = thresh.getContours(cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE, filterfunc=lambda x: cv2.contourArea(x) > cntMinArea)
+# print(str(len(contours)) + ' contours found with area larger than ' + str(cntMinArea))
+
+# Add contours to original image
+# for c in contours:
+#     lineimg.addContour(c, cntDefinition, boxMode=False, color='#FF0000')
+
+# lineimg.addContour(contours[0], cntDefinition, boxMode=False, thick=1, color='#FF0000')
+# lineimg.addContour(contours[1], cntDefinition, boxMode=False, thick=1, color='#00FF00')
+# lineimg.addContour(contours[2], cntDefinition, boxMode=False, thick=1, color='#0000FF')
+# lineimg.addContour(contours[3], cntDefinition, boxMode=False, thick=1, color='#FFFFFF')
+
+# Final Image Visualization
+lineimg.show(view=True)
